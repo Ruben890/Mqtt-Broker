@@ -1,3 +1,7 @@
+## Why use Mqtt-Broker instead of plain MQTTnet?
+
+Mqtt-Broker is built on top of [MQTTnet](https://github.com/chkr1011/MQTTnet), the most popular MQTT library for .NET, but it adds important features that make it especially suitable for IoT device management:
+
 **MQTT Broker - Clean Architecture**
 
 - **Project:** MQTT Broker for IoT device management.
