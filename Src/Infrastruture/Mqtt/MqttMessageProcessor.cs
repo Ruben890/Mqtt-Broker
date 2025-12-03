@@ -73,16 +73,24 @@ public class MqttMessageProcessor
                 // Extraer el último segmento del topic (por ejemplo "status" o "telemetry")
                 var segment = topic.Split('/').Last();
 
-                // Obtener el tipo de evento desde cache o parsearlo
-                var eventType = _topicCache.GetOrAdd(segment.ToLowerInvariant(), s =>
-                    Enum.TryParse<MqttEventType>(s, true, out var parsed) ? parsed : null
-                );
-
-                if (eventType == null)
+                // Normalizar el segmento: quitar guiones y pasarlo a PascalCase
+                string NormalizeSegment(string s)
                 {
-                    _logger.LogWarn($"[MqttMessageProcessor] No MqttEventType mapping for topic segment: {segment}");
-                    continue;
+                    var parts = s.Split(new[] { '-', '_' }, StringSplitOptions.RemoveEmptyEntries);
+                    return string.Concat(parts.Select(p => char.ToUpperInvariant(p[0]) + p.Substring(1).ToLowerInvariant()));
                 }
+
+                var normalizedSegment = NormalizeSegment(segment);
+
+                var eventType = _topicCache.GetOrAdd(normalizedSegment.ToLowerInvariant(), key =>
+                {
+                    // Intentar parsear directamente
+                    if (Enum.TryParse<MqttEventType>(normalizedSegment, true, out var parsed))
+                        return parsed;
+
+                    // Si no existe, puedes devolver un valor por defecto o null
+                    return null;
+                });
 
                 _logger.LogInfo($"[MqttMessageProcessor] Processing event: {eventType} | Topic: {topic}");
 
