@@ -2,6 +2,15 @@
 
 Mqtt-Broker is built on top of [MQTTnet](https://github.com/chkr1011/MQTTnet), the most popular MQTT library for .NET, but it adds important features that make it especially suitable for IoT device management:
 
+- **Clean Architecture**: The project is structured with separate layers (Presentation, Application, Domain, Infrastructure, Persistence, Shared) for better testability and maintainability.
+- **Per-device subscriptions**: Subscribe to `event/{chipId}` topics for targeted one-to-one messaging.
+- **Group management**: Define device groups in the database and publish events to all members automatically.
+- **Event strategies**: Modular handling of events like Status, Telemetry, and Firmware Update Errors with dedicated strategy classes.
+- **Database as source-of-truth**: Device and group information is stored in the database; Redis is used only as a helper/cache.
+- **Seamless .NET integration**: Supports dependency injection, logging, middleware, and REST API integration out-of-the-box.
+
+In short, Mqtt-Broker extends MQTTnet with IoT-specific features that make it easier to manage devices, groups, and event routing in production-ready .NET applications.
+
 **MQTT Broker - Clean Architecture**
 
 - **Project:** MQTT Broker for IoT device management.
