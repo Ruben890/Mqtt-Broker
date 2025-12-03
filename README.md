@@ -225,19 +225,40 @@ Example publish (send an event to device `12345`):
 mqtt-pub -h <broker_host> -t "event/12345" -m '{ "Device": { "ChipId":"12345" }, "Timestamp":"2025-12-03T12:00:00Z", "Details": { "status":"ok" }}'
 ```
 
-Device registration and StatusStrategy
+Device registration and StatusStrategy (MqttEventType.Status)
 After a device connects and subscribes to `event/{chipId}`, it **must send a Status message** to register itself in the system. This is crucial for the backend to know the device exists and can communicate.
 
-Flow:
-1. Device connects to broker and subscribes to `event/{chipId}`.
-2. Device publishes a `MqttRequest<object>` or status message containing its device info (e.g., `ChipId`, `Name`, `FirmwareVersion`, etc.) to a status topic (e.g. `status/{chipId}` or directly to the broker using the `MqttRequest` format).
-3. Backend's `StatusStrategy` (see `Src/Infrastructure/Mqtt/MqttStrategies/StatusStrategy.cs`) receives the status message, parses the `MqttRequest<object>`, extracts the `Device` object, and:
-   - Creates or updates the device record in the database.
-   - Sets device status to `Online`.
-   - Records the timestamp.
-4. Once registered, the device can receive events published to `event/{chipId}` and can be targeted by group operations.
+How event routing works:
+- The system uses **topic segment mapping** to determine the event type. The MQTT message processor extracts the **last segment** of the topic (after the final `/`) and matches it against the `MqttEventType` enum (case-insensitive).
+- Defined event types (see `Src/Shared/Enums/MqttEventType.cs`):
+  - `Status` ← topic ending in `/status`
+  - `Telemetry` ← topic ending in `/telemetry`
+  - `ErrorUpdateFirmwareDevice` ← topic ending in `/error-update-firmware`
 
-Example Status message (device sending registration):
+Registration flow (Status event):
+1. Device connects to broker and subscribes to `event/{chipId}`.
+2. Device publishes a `MqttRequest<object>` message containing its device info (ChipId, Name, FirmwareVersion, MacAddress, ChipType, etc.) **to a topic where the last segment is `status`**.
+   - Examples: `status/{chipId}`, `devices/status/{chipId}`, `{chipId}/status`, etc.
+   - The important part: the topic must end with `/status`.
+3. The MQTT message processor extracts the last segment (`status`), maps it to `MqttEventType.Status`, and routes to `StatusStrategy`.
+4. `StatusStrategy` (see `Src/Infrastructure/Mqtt/MqttStrategies/StatusStrategy.cs`):
+   - Deserializes the JSON payload as `MqttRequest<object>`.
+   - Extracts the `Device` info from `mqttRequest.Device`.
+   - **Creates a new device** in the database if it doesn't exist:
+     - Maps `DeviceDto` to `Device` entity.
+     - Sets `CreatedAt` to the message timestamp.
+     - Generates a unique `Code` for the device.
+     - Resolves/creates the device group and sets `GroupId`.
+     - Creates a `DeviceStatus` record with status `Online`.
+   - **Updates an existing device** if it already exists:
+     - Updates firmware version if it changed.
+     - Updates device status to `Online`.
+     - Updates the status timestamp.
+   - Saves all changes to the database.
+5. Once registered, the device can receive events published to `event/{chipId}` and can be targeted by group operations.
+
+Example Status message (device sends this to register):
+Publish to a topic like `status/{chipId}`, `devices/status/{chipId}`, etc. (last segment must be `status`):
 
 ```json
 {
@@ -255,7 +276,10 @@ Example Status message (device sending registration):
 }
 ```
 
-**Note**: The status message should be published on the same MQTT broker or to a topic that the backend subscribes to. The exact topic depends on your backend configuration (e.g., `status/{chipId}`, `devices/register`, or another topic monitored by the MQTT infrastructure).
+Other event types registered in the system:
+- `MqttEventType.Telemetry` ← topic ending in `/telemetry` → handled by `TelemetryStrategy` (stores telemetry data)
+- `MqttEventType.ErrorUpdateFirmwareDevice` ← topic ending in
+- `/ErrorUpdateFirmwareDevice` → handled by `ErrorUpdateFirmwareDeviceStrategy` (logs firmware update errors)
 
 Microcontroller implementation notes (ESP32/ESP8266 and OTA reference)
 This section gives guidance for implementing the device-side client (microcontroller) compatible with this repo.
@@ -396,6 +420,7 @@ Security notes:
 - For production, prefer a full auth solution (OAuth2/JWT) over static API keys.
 
 Contact / Development
+- **Email**: chinausto@gmail.com
 - Main project file: `Mqtt-Broker/Mqtt-Broker.csproj`.
 - Configuration files: `Mqtt-Broker/appsettings.json` and `Mqtt-Broker/appsettings.Development.json`.
 
