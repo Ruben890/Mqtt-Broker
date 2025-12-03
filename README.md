@@ -233,7 +233,7 @@ How event routing works:
 - Defined event types (see `Src/Shared/Enums/MqttEventType.cs`):
   - `Status` ← topic ending in `/status`
   - `Telemetry` ← topic ending in `/telemetry`
-  - `ErrorUpdateFirmwareDevice` ← topic ending in `/error-update-firmware`
+  - `ErrorUpdateFirmwareDevice` ← topic ending in `/ErrorUpdateFirmwareDevice`
 
 Registration flow (Status event):
 1. Device connects to broker and subscribes to `event/{chipId}`.
