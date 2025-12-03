@@ -84,23 +84,28 @@ public class MqttMessageProcessor
 
                 var eventType = _topicCache.GetOrAdd(normalizedSegment.ToLowerInvariant(), key =>
                 {
-                    // Intentar parsear directamente
                     if (Enum.TryParse<MqttEventType>(normalizedSegment, true, out var parsed))
                         return parsed;
 
-                    // Si no existe, puedes devolver un valor por defecto o null
+                    // Si no existe, retornamos null y lo manejamos después
                     return null;
                 });
 
+                if (eventType == null)
+                {
+                    _logger.LogWarn($"[MqttMessageProcessor] Ignoring unknown event for topic: {topic}");
+                    continue; // Ignora este mensaje y pasa al siguiente
+                }
+
                 _logger.LogInfo($"[MqttMessageProcessor] Processing event: {eventType} | Topic: {topic}");
 
-                //Crear un scope nuevo para cada mensaje
+                // Crear un scope nuevo para cada mensaje
                 using var scope = _scopeFactory.CreateScope();
-
                 var resolver = scope.ServiceProvider.GetRequiredService<IMqttStrategyResolver>();
 
                 // Ejecutar la estrategia dentro del scope
                 await resolver.ResolveAsync(eventType.Value, topic, payload);
+
             }
             catch (Exception ex)
             {
