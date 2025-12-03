@@ -84,7 +84,6 @@ namespace Persitencia.Repositories
                     .Select(x => new Device
                     {
                         Id = x.Id,
-                        UserId = x.UserId,
                         GroupId = x.Groups!.Id,
                         ChipId = x.ChipId,
                         ChipType = x.ChipType,

@@ -1,12 +1,13 @@
-using MqttBroker.API.Extencions;
-using MqttBroker.API.Extensions;
 using Application.Contract.IMqtt;
 using Application.Mappers;
 using Hangfire;
+using Hangfire.MemoryStorage;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Localization;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.ObjectPool;
+using MqttBroker.API.Extencions;
+using MqttBroker.API.Extensions;
 using Persitencia.Contexts;
 using Presentacion.Middleware;
 using Serilog;
@@ -44,6 +45,11 @@ builder.Services.AddRedisConnection(builder.Configuration);
 builder.Services.ConfigureContextPostgreSql<MqttBrokerContext>(connectionString!);
 builder.Services.ConfigureRepositoryManager();
 builder.Services.ConfigureMqttStrategy();
+builder.Services.AddHangfire(config => // Add Hangfire services
+{
+    config.UseMemoryStorage(); // for testing/dev, use proper storage in production
+});
+builder.Services.AddHangfireServer();
 builder.Services.Configure<RequestLocalizationOptions>(options =>
 {
     options.DefaultRequestCulture = new RequestCulture(SupportedLanguages.En);
