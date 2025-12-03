@@ -37,8 +37,9 @@ This ensures the database is the source of truth for group membership. Redis is 
 Basic event flow (receive & send)
 1. The MQTT service (client of the broker) connects to the MQTT broker.
 2. After connecting, the service subscribes to `event/{chipId}` topics for the devices it manages (e.g., all active devices from the DB it needs to monitor).
-3. When the backend needs to notify a device, it publishes to `event/{chipId}`.
-4. To send to a group, backend queries the DB for group members and publishes individually to each `event/{chipId}`.
+3. **Device registration**: After subscribing to `event/{chipId}`, the device **must send a Status event** (via MQTT message with EventType or status topic) to the backend. The backend's `StatusStrategy` receives this message, extracts device info, and registers/updates the device in the database. This ensures the device is discoverable and the system can send/receive events to/from it.
+4. When the backend needs to notify a device, it publishes to `event/{chipId}` (device must be registered first, per step 3).
+5. To send to a group, backend queries the DB for group members and publishes individually to each `event/{chipId}`.
 
 Message standards (real definitions in code)
 The real classes live in `Src/Shared` and use generics for `Details`:
@@ -160,10 +161,37 @@ docker run -d --name redis-noaof -p 6380:6380 redis:7 redis-server --appendonly 
 
 ```json
 {
-	"Redis": {
-		"Aof": "localhost:6379",
-		"NoAof": "localhost:6380"
-	}
+  "ConnectionStrings": {
+    "MqttBrokerConnection": "Server=***;Port=5432;Username=***;Password=***;Database=***;CommandTimeout=300;Pooling=true;MaxPoolSize=100;MinPoolSize=5;ConnectionIdleLifetime=300;Include Error Detail=true"
+  },
+  "ApiKeys": "***",
+  "Redis": {
+    "Persistent": {
+      "ConnectionString": "localhost:6378",
+      "UseAOF": true
+    },
+    "InMemory": {
+      "ConnectionString": "localhost:6379",
+      "UseAOF": false
+    }
+  },
+  "MqttSettings": {
+    "Port": 8083,
+    "ApiKeys": [
+      { "key1": "***" }
+    ]
+  },
+  "ExcludedPaths": [
+    "/scalar/*",
+    "/swagger/*",
+    "/favicon.ico"
+  ],
+  "AllowedOrigins": [
+    "http://localhost:5000",
+    "https://localhost:5000",
+    "http://localhost:5173",
+    "https://localhost:5173"
+  ]
 }
 ```
 
@@ -197,6 +225,38 @@ Example publish (send an event to device `12345`):
 mqtt-pub -h <broker_host> -t "event/12345" -m '{ "Device": { "ChipId":"12345" }, "Timestamp":"2025-12-03T12:00:00Z", "Details": { "status":"ok" }}'
 ```
 
+Device registration and StatusStrategy
+After a device connects and subscribes to `event/{chipId}`, it **must send a Status message** to register itself in the system. This is crucial for the backend to know the device exists and can communicate.
+
+Flow:
+1. Device connects to broker and subscribes to `event/{chipId}`.
+2. Device publishes a `MqttRequest<object>` or status message containing its device info (e.g., `ChipId`, `Name`, `FirmwareVersion`, etc.) to a status topic (e.g. `status/{chipId}` or directly to the broker using the `MqttRequest` format).
+3. Backend's `StatusStrategy` (see `Src/Infrastructure/Mqtt/MqttStrategies/StatusStrategy.cs`) receives the status message, parses the `MqttRequest<object>`, extracts the `Device` object, and:
+   - Creates or updates the device record in the database.
+   - Sets device status to `Online`.
+   - Records the timestamp.
+4. Once registered, the device can receive events published to `event/{chipId}` and can be targeted by group operations.
+
+Example Status message (device sending registration):
+
+```json
+{
+  "Device": {
+    "ChipId": "CHIP-12345",
+    "ChipType": "ESP32",
+    "Name": "Sensor-01",
+    "Code": "SEN-01",
+    "MacAddress": "00:1A:7D:DA:71:13",
+    "FirmwareVersion": "1.2.3",
+    "Status": "Online"
+  },
+  "Timestamp": "2025-12-03T12:00:00Z",
+  "Details": null
+}
+```
+
+**Note**: The status message should be published on the same MQTT broker or to a topic that the backend subscribes to. The exact topic depends on your backend configuration (e.g., `status/{chipId}`, `devices/register`, or another topic monitored by the MQTT infrastructure).
+
 Microcontroller implementation notes (ESP32/ESP8266 and OTA reference)
 This section gives guidance for implementing the device-side client (microcontroller) compatible with this repo.
 
@@ -206,8 +266,9 @@ This section gives guidance for implementing the device-side client (microcontro
 
 - Device responsibilities:
 	- On boot, connect to the MQTT broker and subscribe to `event/{chipId}` (and optionally `group/{groupName}` if you want group subscriptions on device side).
+	- **Immediately after subscribing**, publish a Status message (with device info) so the backend's `StatusStrategy` registers the device in the DB.
 	- Parse incoming `MqttResponse<TDetails>` messages. For firmware updates, use `EventType == "UPDATE_FIRMWARE"` and `Details` payload to download and apply firmware (see MQTTOTA project for the OTA flow and file transfer over MQTT or via HTTP with URL provided).
-	- Send status messages to backend by publishing `MqttRequest<TDetails>` to a configured backend topic (for example `status/{chipId}` or another agreed topic). In this repo the backend expects device-originated messages in the `MqttRequest` structure.
+	- Send status/telemetry messages periodically or on-demand to keep the device registration active. In this repo the backend expects device-originated messages in the `MqttRequest` structure.
 
 - Example device flow for firmware update using MQTTOTA as reference:
 	1. Device subscribes to `event/{chipId}`.
@@ -220,21 +281,127 @@ Integration tips:
 - Consider subscribing to `group/{groupId}` on-device if you want to allow broadcasting from backend without per-device publishes — but remember group membership should still be stored in DB for management and auditing.
 - For minimal devices, implement only the necessary subset of `DeviceDto` (e.g. `ChipId`, `Name`, `FirmwareVersion`) when publishing status.
 
-Recommendations and notes
-- Use DTOs from `Src/Shared` to serialize/deserialize MQTT payloads and avoid schema mismatches.
-- For local testing you can run `mosquitto` in Docker or any MQTT-compatible broker.
-- Keep Redis configuration separate per environment. In production, review persistence, security and high-availability settings.
+**API Keys, Middleware and API response standard**
 
-What can be changed
-- Device grouping and topic conventions are extensible: you can rename topics (e.g. `event/` → `device/`) or create subtopics per event type.
-- The `Shared.Request.MqttRequest` and `Shared.Response.MqttResponse` formats can be extended with extra fields — keep backward compatibility when possible.
+The project expects API key configuration and registers middleware to handle cross-cutting concerns (CORS, API key validation, exception handling, and a standard response wrapper). Below is a guide to the configuration and the runtime behavior.
+
+`appsettings.json` snippet (see above) includes:
+- `ConnectionStrings.MqttBrokerConnection`: DB connection string (Postgres example).
+- `ApiKeys`: global API key string (legacy/simple usage).
+- `MqttSettings.ApiKeys`: array of keys used specifically for MQTT endpoints (can be validated by middleware).
+- `ExcludedPaths`: list of paths excluded from some middlewares (e.g. static files, swagger).
+- `AllowedOrigins`: CORS allowed origins.
+
+Suggested middleware pipeline (order matters):
+1. **Exception handling**: global exception handler to return `BaseResponse` on unhandled errors.
+2. **Logging**: request/response logging.
+3. **CORS**: configured using `AllowedOrigins`.
+4. **ApiKey validation**: middleware that checks requests against configured API keys (either `ApiKeys` or `MqttSettings.ApiKeys`). Returns `401`/`403` wrapped in `BaseResponse` on failure.
+5. **Authentication/Authorization**: JWT or other schemes if required.
+6. **StandardResponseFilter**: an MVC action filter (`Presentacion.Filters.StandardResponseFilter`) that ensures every controller action returns a `BaseResponse`-shaped payload. It also converts exceptions into `BaseResponse`.
+
+Standard API response (`BaseResponse`) — real code (see `Src/Shared/Response/BaseResponse.cs`):
+- `Message` (string?) — localized message or summary.
+- `StatusCode` (HttpStatusCode) — the HTTP status.
+- `Details` (object?) — optional payload with data or error details.
+- `Pagination` (Pagination?) — optional pagination meta when returning lists.
+
+Utility: `BaseResponse.HandleCustomResponse(message, statusCode, details, pagination)` returns a properly formed `BaseResponse` and sets `Pagination` when provided.
+
+Example controller usage (C# pseudo-code):
+
+```csharp
+[HttpGet("devices/{groupId}")]
+public async Task<IActionResult> GetDevicesByGroup(Guid groupId)
+{
+    var devices = await _deviceService.GetDevicesByGroupAsync(groupId);
+    var response = BaseResponse.HandleCustomResponse(
+        message: "devices_fetched",
+        statusCode: HttpStatusCode.OK,
+        details: devices
+    );
+    return Ok(response); // StandardResponseFilter will respect BaseResponse
+}
+```
+
+Example JSON response (success):
+
+```json
+{
+  "Message": "Operation completed successfully.",
+  "StatusCode": 200,
+  "Details": [ { "ChipId": "CHIP-12345", "Name": "Sensor-01" } ],
+  "Pagination": null
+}
+```
+
+Example JSON response (error):
+
+```json
+{
+  "Message": "An unexpected error occurred.",
+  "StatusCode": 500,
+  "Details": "NullReferenceException: ...",
+  "Pagination": null
+}
+```
+
+Notes about API key middleware:
+- Implement a small middleware that reads `Authorization` header or a custom header (e.g. `X-Api-Key`) and compares against `MqttSettings.ApiKeys` or `ApiKeys`.
+- If the request path matches an `ExcludedPaths` pattern, skip API key validation.
+- On invalid key, return `401`/`403` with a `BaseResponse` payload.
+
+Example minimal ApiKey middleware (conceptual):
+
+```csharp
+public class ApiKeyMiddleware
+{
+    private readonly RequestDelegate _next;
+    private readonly IConfiguration _config;
+
+    public ApiKeyMiddleware(RequestDelegate next, IConfiguration config)
+    {
+        _next = next;
+        _config = config;
+    }
+
+    public async Task Invoke(HttpContext context)
+    {
+        var path = context.Request.Path.Value;
+        if (IsExcluded(path))
+        {
+            await _next(context);
+            return;
+        }
+
+        var key = context.Request.Headers["X-Api-Key"].FirstOrDefault();
+        var configuredKeys = _config.GetSection("MqttSettings:ApiKeys").Get<List<Dictionary<string,string>>>()
+            .SelectMany(d => d.Values).ToList();
+
+        if (string.IsNullOrEmpty(key) || !configuredKeys.Contains(key))
+        {
+            context.Response.StatusCode = 401;
+            var resp = BaseResponse.HandleCustomResponse("Invalid API Key", HttpStatusCode.Unauthorized);
+            await context.Response.WriteAsJsonAsync(resp);
+            return;
+        }
+
+        await _next(context);
+    }
+}
+```
+
+Security notes:
+- Keep API keys secret and rotate them as needed.
+- For production, prefer a full auth solution (OAuth2/JWT) over static API keys.
 
 Contact / Development
 - Main project file: `Mqtt-Broker/Mqtt-Broker.csproj`.
 - Configuration files: `Mqtt-Broker/appsettings.json` and `Mqtt-Broker/appsettings.Development.json`.
 
 --
-This README explains the architecture, project structure, how to run a development environment with two Redis instances (AOF true/false), and provides guidance for microcontroller implementation using the MQTTOTA project as a reference. If you want, I can:
+This README explains the architecture, project structure, how to run a development environment with two Redis instances (AOF true/false), provides guidance for microcontroller implementation using the MQTTOTA project as a reference, and documents API key configuration, middleware pipeline and the `BaseResponse` API standard. If you want, I can:
 - Add a full `docker-compose.yml` that runs the app plus both Redis instances for development.
 - Extract DTO definitions into a small device-side JSON spec file and examples for common `Details` types (`UpdateFirmwareMqtt`, `TelemetryRecordRequest`, etc.).
+
 
