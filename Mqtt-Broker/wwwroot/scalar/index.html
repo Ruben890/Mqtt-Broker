@@ -1,0 +1,25 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Referencia de la API</title>
+</head>
+<body>
+    <div id="app"></div>
+
+    <!-- Cargar el script de Scalar desde el CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.38.1"></script>
+
+    <script>
+        // Crear la referencia de la API y montarla en el elemento con id "app"
+        Scalar.createApiReference('#app', {
+            url: '/swagger/v1/swagger.json',
+            theme: 'solarized',
+            fetchOptions: {
+                credentials: 'include' // 🔥 Permite enviar/recibir cookies
+            }
+        });
+    </script>
+</body>
+</html>
