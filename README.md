@@ -1,8 +1,10 @@
+# MQTT Broker - Clean Architecture
+
 ## Why use Mqtt-Broker instead of plain MQTTnet?
 
 Mqtt-Broker is built on top of [MQTTnet](https://github.com/chkr1011/MQTTnet), the most popular MQTT library for .NET, but it adds important features that make it especially suitable for IoT device management:
 
-- **Clean Architecture**: The project is structured with separate layers (Presentation, Application, Domain, Infrastructure, Persistence, Shared) for better testability and maintainability.
+- **Clean Architecture**: Structured with separate layers (Presentation, Application, Domain, Infrastructure, Persistence, Shared) for better testability and maintainability.
 - **Per-device subscriptions**: Subscribe to `event/{chipId}` topics for targeted one-to-one messaging.
 - **Group management**: Define device groups in the database and publish events to all members automatically.
 - **Event strategies**: Modular handling of events like Status, Telemetry, and Firmware Update Errors with dedicated strategy classes.
@@ -11,25 +13,30 @@ Mqtt-Broker is built on top of [MQTTnet](https://github.com/chkr1011/MQTTnet), t
 
 In short, Mqtt-Broker extends MQTTnet with IoT-specific features that make it easier to manage devices, groups, and event routing in production-ready .NET applications.
 
-**MQTT Broker - Clean Architecture**
+---
 
-- **Project:** MQTT Broker for IoT device management.
-- **Architecture:** Clean Architecture (separated layers: Presentation, Application, Domain, Infrastructure, Persistence, Shared).
+## Project Overview
 
-Summary:
-- This repository implements an MQTT broker/service built on .NET (see `Mqtt-Broker` and the solution `Mqtt-Broker.sln`).
-- It follows Clean Architecture principles to keep responsibilities separated, improve testability and scalability.
-- Features: per-device subscription using the `event/{chipId}` topic, one-to-one event delivery, grouping of devices, and group event delivery.
+- **Project**: MQTT Broker for IoT device management  
+- **Architecture**: Clean Architecture (separated layers: Presentation, Application, Domain, Infrastructure, Persistence, Shared)  
+- **Summary**: Implements an MQTT broker/service built on .NET (see Mqtt-Broker and the solution `Mqtt-Broker.sln`). Follows Clean Architecture principles to keep responsibilities separated, improve testability and scalability.
 
-Project structure
-- `Mqtt-Broker/`: Main application (API/host). Contains `Program.cs`, `appsettings.json` and server configuration.
-- `Src/Presentacion/`: Controllers, middleware and exposed endpoints.
-- `Src/Application/`: Use cases, application services and mappings (AutoMapper profiles in `Mappers`).
-- `Src/Domain/`: Domain entities and business logic.
-- `Src/Infrastructure/`: Concrete implementations for MQTT, Redis, logging, etc.
-- `Src/Persitencia/`: Repositories, data contexts and UnitOfWork.
-- `Src/Shared/`: DTOs, standard Requests/Responses (`Shared.Request.MqttRequest`, `Shared.Response.MqttResponse`), enums and utilities.
-- `Extencions/`: Extension methods for configuration and service wiring.
+### Features
+
+- Per-device subscription using `event/{chipId}` topic  
+- One-to-one event delivery  
+- Device grouping and group event delivery  
+
+### Project Structure
+
+- **Mqtt-Broker/**: Main application (API/host). Contains `Program.cs`, `appsettings.json`, server configuration.  
+- **Src/Presentacion/**: Controllers, middleware, endpoints.  
+- **Src/Application/**: Use cases, application services, mappings (AutoMapper).  
+- **Src/Domain/**: Domain entities and business logic.  
+- **Src/Infrastructure/**: Concrete implementations for MQTT, Redis, logging, etc.  
+- **Src/Persitencia/**: Repositories, data contexts, UnitOfWork.  
+- **Src/Shared/**: DTOs, standard requests/responses, enums, utilities.  
+- **Extencions/**: Extension methods for configuration and service wiring.
 
 Main goals
 - Serve as a central point to receive and route MQTT events to/from devices.
